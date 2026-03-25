@@ -1,0 +1,6 @@
+{
+  "name": "Jellyfin Recently Added Card",
+  "render_readme": true,
+  "filename": "jellyfin-recently-added-card.js",
+  "content_in_root": false
+}
