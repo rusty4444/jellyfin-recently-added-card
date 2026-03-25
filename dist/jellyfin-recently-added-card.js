@@ -369,10 +369,16 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
   _render() {
     const title = this._config.title;
 
-    // Jellyfin logo — inline SVG using official brand color #00A4DC
+    // Official Jellyfin logo — nested triangles with brand gradient
     const jellyfinLogo = `
-      <svg class="jellyfin-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-label="Jellyfin">
-        <path fill="#00A4DC" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 1.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17zm0 2a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm-1 2.5h2v5.5l3.5 2-.75 1.3L12 14.5l-3.75 2.3-.75-1.3L11 13.5V8z"/>
+      <svg class="jellyfin-logo" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" aria-label="Jellyfin">
+        <defs>
+          <linearGradient id="jf-grad" gradientUnits="userSpaceOnUse" x1="126" y1="219" x2="458" y2="411">
+            <stop offset="0%" stop-color="#aa5cc3"/><stop offset="100%" stop-color="#00a4dc"/>
+          </linearGradient>
+        </defs>
+        <path fill="url(#jf-grad)" d="M190.56 329.07c8.63 17.3 122.4 17.12 130.93 0 8.52-17.1-47.9-119.78-65.46-119.8-17.57 0-74.1 102.5-65.47 119.8z"/>
+        <path fill="url(#jf-grad)" d="M58.75 417.03c25.97 52.15 368.86 51.55 394.55 0S308.93 56.08 256.03 56.08c-52.92 0-223.25 308.8-197.28 360.95zm68.04-45.25c-17.02-34.17 94.6-236.5 129.26-236.5 34.67 0 146.1 202.7 129.26 236.5-16.83 33.8-241.5 34.17-258.52 0z"/>
       </svg>`;
 
     this.shadowRoot.innerHTML = `
