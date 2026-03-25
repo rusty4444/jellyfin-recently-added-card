@@ -15,6 +15,7 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
     this._cycleTimer = null;
     this._config = {};
     this._userId = null; // cached userId
+    this._trailerCache = {}; // tmdbId → YouTube URL or null
   }
 
   setConfig(config) {
@@ -99,7 +100,7 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
         `${base}/Users/${userId}/Items/Latest` +
           `?IncludeItemTypes=Movie` +
           `&Limit=${moviesCount * 2}` +
-          `&Fields=Overview,Genres,OfficialRating,CommunityRating,RunTimeTicks,DateCreated,RemoteTrailers` +
+          `&Fields=Overview,Genres,OfficialRating,CommunityRating,RunTimeTicks,DateCreated,ProviderIds` +
           `&EnableImageTypes=Primary,Backdrop`,
         { headers }
       );
@@ -176,9 +177,8 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
           ? this._backdropUrl(item.Id)
           : this._posterUrl(item.Id);
 
-        const trailerUrl = (item.RemoteTrailers && item.RemoteTrailers[0])
-          ? item.RemoteTrailers[0].Url
-          : '';
+        const tmdbId = (item.ProviderIds?.Tmdb || item.ProviderIds?.tmdb || '').trim();
+        const imdbId = (item.ProviderIds?.Imdb || item.ProviderIds?.imdb || '').trim();
 
         return {
           title: item.Name,
@@ -191,7 +191,9 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
           thumb: this._posterUrl(item.Id),
           art: artUrl,
           addedAt,
-          trailerUrl,
+          tmdbId,
+          imdbId,
+          trailerUrl: null, // null = not yet fetched; '' = fetched but none found
         };
       });
 
@@ -357,15 +359,33 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
       counterEl.textContent = `${this._currentIndex + 1} / ${this._items.length}`;
     }
 
-    // Trailer button — show only for movies with a trailer URL
+    // Trailer button — show only for movies with a known trailer URL
     const trailerBtn = root.querySelector('.trailer-btn');
     if (trailerBtn) {
       if (item.type === 'movie' && item.trailerUrl) {
+        // Already have a URL — show button immediately
         trailerBtn.classList.add('visible');
         trailerBtn.onclick = (e) => {
           e.stopPropagation();
           this._playTrailer(item.trailerUrl);
         };
+      } else if (item.type === 'movie' && item.trailerUrl === null && (item.tmdbId || item.imdbId)) {
+        // Not yet fetched — hide button and kick off lazy fetch
+        trailerBtn.classList.remove('visible');
+        trailerBtn.onclick = null;
+        this._fetchTrailer(item.tmdbId, item.imdbId).then((url) => {
+          item.trailerUrl = url || ''; // cache on the item object
+          // Only update the button if this item is still the one being displayed
+          if (this._items[this._currentIndex] === item) {
+            if (url) {
+              trailerBtn.classList.add('visible');
+              trailerBtn.onclick = (e) => {
+                e.stopPropagation();
+                this._playTrailer(url);
+              };
+            }
+          }
+        });
       } else {
         trailerBtn.classList.remove('visible');
         trailerBtn.onclick = null;
@@ -387,6 +407,84 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
 
   // ── Trailer helpers ────────────────────────────────────────────────────────
 
+  async _fetchTrailer(tmdbId, imdbId) {
+    if (!this._config.tmdb_api_key) return null;
+
+    // Resolve TMDB ID from IMDB ID if needed
+    let resolvedTmdbId = tmdbId;
+    if (!resolvedTmdbId && imdbId) {
+      const cacheKey = `imdb:${imdbId}`;
+      if (cacheKey in this._trailerCache) return this._trailerCache[cacheKey];
+      try {
+        const findResp = await fetch(
+          `https://api.themoviedb.org/3/find/${imdbId}?external_source=imdb_id`,
+          {
+            headers: {
+              Authorization: `Bearer ${this._config.tmdb_api_key}`,
+              Accept: 'application/json',
+            },
+          }
+        );
+        if (findResp.ok) {
+          const findData = await findResp.json();
+          const movieResult = findData.movie_results && findData.movie_results[0];
+          if (movieResult) resolvedTmdbId = String(movieResult.id);
+        }
+      } catch (e) {
+        console.warn('Jellyfin Card: TMDB find lookup failed', e);
+      }
+      if (!resolvedTmdbId) {
+        this._trailerCache[cacheKey] = null;
+        return null;
+      }
+    }
+
+    if (!resolvedTmdbId) return null;
+
+    const cacheKey = `tmdb:${resolvedTmdbId}`;
+    if (cacheKey in this._trailerCache) return this._trailerCache[cacheKey];
+
+    try {
+      const resp = await fetch(
+        `https://api.themoviedb.org/3/movie/${resolvedTmdbId}/videos?language=en-US`,
+        {
+          headers: {
+            Authorization: `Bearer ${this._config.tmdb_api_key}`,
+            Accept: 'application/json',
+          },
+        }
+      );
+      if (!resp.ok) {
+        this._trailerCache[cacheKey] = null;
+        return null;
+      }
+      const data = await resp.json();
+      const videos = Array.isArray(data.results) ? data.results : [];
+
+      // Prefer: official YouTube trailer > any YouTube trailer > any YouTube video
+      const youtubeVideos = videos.filter((v) => v.site === 'YouTube');
+      const officialTrailer = youtubeVideos.find(
+        (v) => v.type === 'Trailer' && v.official
+      );
+      const anyTrailer = youtubeVideos.find((v) => v.type === 'Trailer');
+      const anyYoutube = youtubeVideos[0];
+
+      const best = officialTrailer || anyTrailer || anyYoutube || null;
+      const url = best ? `https://www.youtube.com/watch?v=${best.key}` : null;
+
+      this._trailerCache[cacheKey] = url;
+      // Also cache under the imdb key to avoid double-lookups
+      if (imdbId && !tmdbId) {
+        this._trailerCache[`imdb:${imdbId}`] = url;
+      }
+      return url;
+    } catch (e) {
+      console.warn('Jellyfin Card: TMDB videos fetch failed', e);
+      this._trailerCache[cacheKey] = null;
+      return null;
+    }
+  }
+
   _getYouTubeId(url) {
     if (!url) return null;
     const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([-\w]{11})/);
@@ -396,29 +494,7 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
   _playTrailer(url) {
     const ytId = this._getYouTubeId(url);
     if (!ytId) return;
-
-    const root = this.shadowRoot;
-    const container = root.querySelector('.trailer-container');
-    const frame = root.querySelector('#trailerFrame');
-    const closeBtn = root.querySelector('.trailer-close');
-
-    frame.src = `https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0`;
-    container.classList.add('active');
-
-    // Pause cycling while trailer plays
-    if (this._cycleTimer) {
-      clearInterval(this._cycleTimer);
-      this._cycleTimer = null;
-    }
-
-    // Close handler — clears iframe src to stop playback and resumes cycling
-    const close = () => {
-      frame.src = '';
-      container.classList.remove('active');
-      this._startCycle();
-      closeBtn.removeEventListener('click', close);
-    };
-    closeBtn.addEventListener('click', close);
+    window.open(`https://www.youtube.com/watch?v=${ytId}`, '_blank');
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
