@@ -141,6 +141,7 @@ The card uses TMDB to look up movie trailers by matching the media's TMDB ID. Tr
 - [jellyfin-now-showing](https://github.com/rusty4444/jellyfin-now-showing) — a cinema-style "Now Showing" marquee display for Jellyfin playback
 - [plex-recently-added-card](https://github.com/rusty4444/plex-recently-added-card) — the Plex version of this project
 - [kodi-recently-added-card](https://github.com/rusty4444/kodi-recently-added-card) — the Kodi version of this project
+- [emby-recently-added-card](https://github.com/rusty4444/emby-recently-added-card) / [emby-now-showing](https://github.com/rusty4444/emby-now-showing) — Emby versions
 
 ---
 
