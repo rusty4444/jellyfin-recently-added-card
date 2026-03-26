@@ -1105,6 +1105,81 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
     };
   }
 
+  static getConfigForm() {
+    return {
+      schema: [
+        {
+          name: 'jellyfin_url',
+          required: true,
+          selector: { text: {} },
+        },
+        {
+          name: 'api_key',
+          required: true,
+          selector: { text: { type: 'password' } },
+        },
+        {
+          name: 'user_id',
+          selector: { text: {} },
+        },
+        {
+          type: 'grid',
+          name: '',
+          schema: [
+            {
+              name: 'movies_count',
+              selector: { number: { min: 1, max: 20, mode: 'box' } },
+            },
+            {
+              name: 'shows_count',
+              selector: { number: { min: 1, max: 20, mode: 'box' } },
+            },
+          ],
+        },
+        {
+          type: 'grid',
+          name: '',
+          schema: [
+            {
+              name: 'cycle_interval',
+              selector: { number: { min: 3, max: 60, mode: 'box', unit_of_measurement: 'seconds' } },
+            },
+            {
+              name: 'title',
+              selector: { text: {} },
+            },
+          ],
+        },
+        {
+          name: 'tmdb_api_key',
+          selector: { text: { type: 'password' } },
+        },
+      ],
+      computeLabel: (schema) => {
+        const labels = {
+          jellyfin_url: 'Jellyfin Server URL',
+          api_key: 'API Key',
+          user_id: 'User ID',
+          movies_count: 'Number of Movies',
+          shows_count: 'Number of TV Shows',
+          cycle_interval: 'Cycle Interval',
+          title: 'Card Title',
+          tmdb_api_key: 'TMDB API Key (for trailers)',
+        };
+        return labels[schema.name] || schema.name;
+      },
+      computeHelper: (schema) => {
+        const helpers = {
+          jellyfin_url: 'e.g. http://192.168.1.100:8096',
+          api_key: 'Jellyfin Dashboard → API Keys',
+          user_id: 'Optional — auto-detected if left blank',
+          tmdb_api_key: 'Optional — enables trailer button. Get a free key at themoviedb.org',
+        };
+        return helpers[schema.name] || undefined;
+      },
+    };
+  }
+
   disconnectedCallback() {
     if (this._cycleTimer) {
       clearInterval(this._cycleTimer);
