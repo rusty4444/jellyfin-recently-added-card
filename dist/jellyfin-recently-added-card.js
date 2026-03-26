@@ -120,7 +120,7 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
         `${base}/Users/${userId}/Items/Latest` +
           `?IncludeItemTypes=Episode` +
           `&Limit=${showsCount * 6}` +
-          `&Fields=Overview,Genres,OfficialRating,CommunityRating,RunTimeTicks,DateCreated,SeriesName,SeasonName,IndexNumber,ParentIndexNumber` +
+          `&Fields=Overview,Genres,OfficialRating,CommunityRating,RunTimeTicks,DateCreated,SeriesName,SeasonName,IndexNumber,ParentIndexNumber,SeriesId` +
           `&EnableImageTypes=Primary,Backdrop`,
         { headers }
       );
@@ -240,7 +240,9 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
           thumb: this._posterUrl(seriesId),
           art: artUrl,
           addedAt,
-          trailerUrl: '',
+          seriesId: item.SeriesId || null,
+          seasonNumber: item.ParentIndexNumber || null,
+          trailerUrl: null,
         };
       });
 
@@ -359,36 +361,35 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
       counterEl.textContent = `${this._currentIndex + 1} / ${this._items.length}`;
     }
 
-    // Trailer button — show only for movies with a known trailer URL
+    // Trailer button — show for movies and TV shows; lazy-fetch trailer URL
     const trailerBtn = root.querySelector('.trailer-btn');
     if (trailerBtn) {
-      if (item.type === 'movie' && item.trailerUrl) {
-        // Already have a URL — show button immediately
-        trailerBtn.classList.add('visible');
-        trailerBtn.onclick = (e) => {
-          e.stopPropagation();
-          this._playTrailer(item.trailerUrl);
-        };
-      } else if (item.type === 'movie' && item.trailerUrl === null && (item.tmdbId || item.imdbId)) {
-        // Not yet fetched — hide button and kick off lazy fetch
-        trailerBtn.classList.remove('visible');
-        trailerBtn.onclick = null;
-        this._fetchTrailer(item.tmdbId, item.imdbId).then((url) => {
-          item.trailerUrl = url || ''; // cache on the item object
-          // Only update the button if this item is still the one being displayed
-          if (this._items[this._currentIndex] === item) {
-            if (url) {
-              trailerBtn.classList.add('visible');
-              trailerBtn.onclick = (e) => {
-                e.stopPropagation();
-                this._playTrailer(url);
-              };
-            }
-          }
-        });
-      } else {
-        trailerBtn.classList.remove('visible');
-        trailerBtn.onclick = null;
+      trailerBtn.classList.remove('visible');
+      trailerBtn.onclick = null;
+
+      const showTrailerBtn = (url) => {
+        if (url && this._items[this._currentIndex] === item) {
+          trailerBtn.classList.add('visible');
+          trailerBtn.onclick = (e) => { e.stopPropagation(); this._playTrailer(url); };
+        }
+      };
+
+      if (item.trailerUrl) {
+        showTrailerBtn(item.trailerUrl);
+      } else if (item.trailerUrl === null) {
+        // Not yet fetched — determine fetch method
+        let fetchPromise;
+        if (item.type === 'movie' && (item.tmdbId || item.imdbId)) {
+          fetchPromise = this._fetchTrailer(item.tmdbId, item.imdbId);
+        } else if (item.type === 'tv' && item.seriesId) {
+          fetchPromise = this._fetchTvTrailer(item.seriesId, item.seasonNumber);
+        }
+        if (fetchPromise) {
+          fetchPromise.then((url) => {
+            item.trailerUrl = url || undefined;
+            showTrailerBtn(url);
+          });
+        }
       }
     }
 
@@ -406,6 +407,79 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
   }
 
   // ── Trailer helpers ────────────────────────────────────────────────────────
+
+  async _fetchTvTrailer(seriesId, seasonNumber) {
+    const cacheKey = `tv_${seriesId}_${seasonNumber}`;
+    if (cacheKey in this._trailerCache) return this._trailerCache[cacheKey];
+    if (!this._config.tmdb_api_key) return null;
+
+    const tmdbToken = this._config.tmdb_api_key;
+    const tmdbHeaders = {
+      Authorization: `Bearer ${tmdbToken}`,
+      Accept: 'application/json',
+    };
+
+    try {
+      const base = this._config.jellyfin_url.replace(/\/$/, '');
+      const key = this._config.api_key;
+      const userId = await this._resolveUserId();
+
+      // Step 1: Fetch series metadata from Jellyfin to get TMDB ID
+      const seriesResp = await fetch(
+        `${base}/Users/${userId}/Items/${seriesId}?Fields=ProviderIds&api_key=${key}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (!seriesResp.ok) throw new Error(`Jellyfin series metadata HTTP ${seriesResp.status}`);
+      const seriesData = await seriesResp.json();
+      const tmdbId = (seriesData.ProviderIds?.Tmdb || seriesData.ProviderIds?.tmdb || '').trim();
+      if (!tmdbId) {
+        this._trailerCache[cacheKey] = null;
+        return null;
+      }
+
+      // Step 2: Try season-specific trailer first
+      let youtubeUrl = null;
+      if (seasonNumber) {
+        try {
+          const seasonResp = await fetch(
+            `https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}/videos?language=en-US`,
+            { headers: tmdbHeaders }
+          );
+          if (seasonResp.ok) {
+            const seasonVidData = await seasonResp.json();
+            const vids = seasonVidData.results || [];
+            const trailer = vids.find(v => v.type === 'Trailer' && v.site === 'YouTube' && v.official) ||
+                            vids.find(v => v.type === 'Trailer' && v.site === 'YouTube') ||
+                            vids.find(v => v.site === 'YouTube');
+            if (trailer) youtubeUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
+          }
+        } catch (e) { /* fall through to series-level */ }
+      }
+
+      // Step 3: Fall back to series-level trailer
+      if (!youtubeUrl) {
+        const seriesVidResp = await fetch(
+          `https://api.themoviedb.org/3/tv/${tmdbId}/videos?language=en-US`,
+          { headers: tmdbHeaders }
+        );
+        if (seriesVidResp.ok) {
+          const seriesVidData = await seriesVidResp.json();
+          const vids = seriesVidData.results || [];
+          const trailer = vids.find(v => v.type === 'Trailer' && v.site === 'YouTube' && v.official) ||
+                          vids.find(v => v.type === 'Trailer' && v.site === 'YouTube') ||
+                          vids.find(v => v.site === 'YouTube');
+          if (trailer) youtubeUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
+        }
+      }
+
+      this._trailerCache[cacheKey] = youtubeUrl;
+      return youtubeUrl;
+    } catch (err) {
+      console.warn('Jellyfin Recently Added Card: TV trailer fetch error', err);
+      this._trailerCache[cacheKey] = null;
+      return null;
+    }
+  }
 
   async _fetchTrailer(tmdbId, imdbId) {
     if (!this._config.tmdb_api_key) return null;
@@ -667,11 +741,12 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
         .header {
           display: flex;
           align-items: center;
-          justify-content: space-between;
+          gap: 10px;
           margin-bottom: 14px;
         }
 
         .header-title {
+          flex: 1;
           display: flex;
           align-items: center;
           gap: 8px;
@@ -862,19 +937,22 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
         .trailer-btn {
           display: none;
           align-items: center;
+          justify-content: center;
           gap: 6px;
           background: rgba(255, 255, 255, 0.1);
           border: 1px solid rgba(255, 255, 255, 0.2);
           color: #ddd;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 12px;
+          font-size: 13px;
           font-weight: 600;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
-          padding: 6px 14px;
-          border-radius: 4px;
+          padding: 8px 16px;
+          border-radius: 6px;
           cursor: pointer;
           transition: all 0.2s ease;
+          min-width: 100px;
+          min-height: 38px;
         }
 
         .trailer-btn:hover {
@@ -887,8 +965,8 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
         }
 
         .trailer-btn svg {
-          width: 14px;
-          height: 14px;
+          width: 16px;
+          height: 16px;
           fill: currentColor;
         }
 
@@ -975,6 +1053,10 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
                 ${jellyfinLogo}
                 ${title}
               </span>
+              <button class="trailer-btn" id="trailerBtn">
+                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                Trailer
+              </button>
               <span class="counter"></span>
             </div>
             ` : ''}
@@ -995,10 +1077,6 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
                   <span class="time-ago"></span>
                 </div>
                 <div class="item-summary"></div>
-                <button class="trailer-btn" id="trailerBtn">
-                  <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  Trailer
-                </button>
               </div>
             </div>
 
