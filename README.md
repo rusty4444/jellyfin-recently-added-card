@@ -158,6 +158,12 @@ The card uses TMDB to look up movie trailers by matching the media's TMDB ID. Tr
 
 ---
 
+## Known Issues
+
+- **Geo-restricted trailers**: Some trailers may show "Video unavailable — The uploader has not made this video available in your country." This is a YouTube/TMDB restriction and cannot be fixed by the card.
+
+---
+
 ## Related
 
 - [jellyfin-now-showing](https://github.com/rusty4444/jellyfin-now-showing) — a cinema-style "Now Showing" marquee display for Jellyfin playback
