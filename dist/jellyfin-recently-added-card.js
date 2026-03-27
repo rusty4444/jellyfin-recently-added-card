@@ -41,6 +41,8 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
     // Apply fixed-height class if fill_height is disabled
     if (this._config.fill_height === false) {
       this.classList.add('fixed-height');
+      const h = (this._config.card_height || 300) + 'px';
+      this.style.setProperty('--card-fixed-height', h);
     } else {
       this.classList.remove('fixed-height');
     }
@@ -696,17 +698,16 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
         }
 
         :host(.fixed-height) ha-card {
-          height: auto;
-          min-height: 300px;
+          height: var(--card-fixed-height, 300px);
         }
 
         :host(.fixed-height) .card {
           position: relative;
-          min-height: 300px;
+          height: var(--card-fixed-height, 300px);
         }
 
         :host(.fixed-height) .content {
-          min-height: 300px;
+          min-height: var(--card-fixed-height, 300px);
         }
 
         .card {
@@ -1184,6 +1185,10 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
           name: 'fill_height',
           selector: { boolean: {} },
         },
+        {
+          name: 'card_height',
+          selector: { number: { min: 200, max: 800, mode: 'box', unit_of_measurement: 'px' } },
+        },
       ],
       computeLabel: (schema) => {
         const labels = {
@@ -1196,6 +1201,7 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
           title: 'Card Title',
           tmdb_api_key: 'TMDB API Key (for trailers)',
           fill_height: 'Fill Container Height',
+          card_height: 'Card Height',
         };
         return labels[schema.name] || schema.name;
       },
@@ -1206,6 +1212,7 @@ class JellyfinRecentlyAddedCard extends HTMLElement {
           user_id: 'Optional — auto-detected if left blank',
           tmdb_api_key: 'Optional — enables trailer button. Get a free key at themoviedb.org',
           fill_height: 'Enable if your card has proper height. Disable if the card appears collapsed/too short.',
+          card_height: 'Height in pixels when Fill Container Height is off. Default: 300',
         };
         return helpers[schema.name] || undefined;
       },
